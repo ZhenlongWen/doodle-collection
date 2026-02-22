@@ -1,0 +1,9 @@
+{
+    "compilerOptions": {
+        "lib": ["deno.window", "dom"]
+    },
+    "tasks": {
+        "start": "deno run -A --watch src/server/main.ts",
+        "build": "cd frontend && npm run build"
+    }
+}

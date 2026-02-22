@@ -1,57 +1,59 @@
-# WEBAPP_STARTER
+# Doodle Collection
 
-This is a template for a simple Deno webapp project using Oak.
+A simple full-stack app:
+- Draw or upload an image
+- Let OpenAI extract a short visual query
+- Fetch matching objects from the Cooper Hewitt collection
+- Show results in a configurable gallery layout
 
-This is the starter project for Web App assignment in the Javascript + OpenAI course.
+## Project structure
 
-## File Structure
-
-**.vscode**
-configuration files for VS Code
-
-**src**
-JavaScript source files
-
-**src/shared**
-JS+OAI shared library code
-
-**.env-template**
-template for .env file, which will hold your API keys
-
-**.gitignore**
-tells git which files to ignore
-
-**README.md**
-this file, info about the repo
-
-## Running
-
-From the command line confirm that your current working directory is the root of the project.
-
-```bash
-pwd
+```text
+.
+├── frontend/                 # React + Vite UI
+│   └── src/
+│       ├── features/
+│       │   ├── analysis/     # Buttons, upload, query panel
+│       │   ├── canvas/       # Drawing canvas
+│       │   └── gallery/      # Gallery + layout strategy
+│       ├── lib/              # API client + shared frontend types
+│       ├── App.tsx
+│       ├── main.tsx
+│       └── styles.css
+├── src/server/               # Deno API server
+│   ├── services/
+│   │   ├── imageAnalysis.ts
+│   │   └── cooperHewitt.ts
+│   ├── config.ts
+│   ├── main.ts
+│   └── types.ts
+└── deno.json
 ```
 
-Option 1: run the app directly
+## Setup
+
+1. Add your key to `.env`:
 
 ```bash
-deno run -A src/main.js
+OPENAI_API_KEY=your_key_here
 ```
 
-Option 2: use the tesk defined in deno.json
+2. Build frontend:
+
+```bash
+deno task build
+```
+
+3. Run server:
 
 ```bash
 deno task start
 ```
 
-When you are done, shut it down by typing `ctrl-c` in the terminal.
+Open [http://localhost:8000](http://localhost:8000).
 
-## Troubleshooting
+## Change gallery structure later
 
-**error: AddrInUse: Address already in use**
-This error can happen if your app exits without properly closing the server .
-You can fix this by killing the process that is using the port.
-
-```
-kill -9 $(lsof -t -i:8000)
-```
+Edit `frontend/src/features/gallery/layout.ts`:
+- `DEFAULT_GALLERY_LAYOUT` changes the active layout
+- `splitItemsByLayout()` controls how items are grouped into columns
