@@ -8,8 +8,14 @@ import {
 
 const STROKE_COLOR = "#0f172a";
 const STROKE_WIDTH = 3;
-const EXPORT_SIZE = 800;
+const EXPORT_MIN_SIZE = 1024;
+const EXPORT_MAX_SIZE = 1600;
 const EXPORT_PADDING = 36;
+const HINT_FONT_SIZE = 22;
+const MAX_DEVICE_PIXEL_RATIO = 2;
+const UPLOAD_PREVIEW_MAX_CSS_SIZE = 320;
+const getClampedDevicePixelRatio = () =>
+  Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO);
 
 export interface SketchCanvasHandle {
   clear: () => void;
@@ -31,59 +37,121 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
     const [isClearing, setIsClearing] = useState(false);
     const [showHint, setShowHint] = useState(true);
     const lastPoint = useRef({ x: 0, y: 0 });
+    const contentModeRef = useRef<"empty" | "drawing" | "upload">("empty");
+    const uploadedImageRef = useRef<HTMLImageElement | null>(null);
+    const uploadedPreviewCssSizeRef = useRef<{ width: number; height: number } | null>(null);
 
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
 
       const parent = canvas.parentElement;
+      const dpr = getClampedDevicePixelRatio();
       if (parent) {
-        canvas.width = parent.clientWidth || window.innerWidth;
-        canvas.height = parent.clientHeight || window.innerHeight;
+        const cssWidth = parent.clientWidth || window.innerWidth;
+        const cssHeight = parent.clientHeight || window.innerHeight;
+        canvas.width = Math.max(1, Math.round(cssWidth * dpr));
+        canvas.height = Math.max(1, Math.round(cssHeight * dpr));
       } else {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        canvas.width = Math.max(1, Math.round(window.innerWidth * dpr));
+        canvas.height = Math.max(1, Math.round(window.innerHeight * dpr));
       }
       canvas.style.touchAction = "none";
 
       renderHint();
 
-      let timeoutId: number;
-      const observer = new ResizeObserver((entries) => {
-        const entry = entries[0];
-        window.clearTimeout(timeoutId);
-        timeoutId = window.setTimeout(() => {
-          const newWidth = entry.contentRect.width;
-          const newHeight = entry.contentRect.height;
-          if (!newWidth || !newHeight) return;
-          if (
-            Math.abs(canvas.width - newWidth) < 2 &&
-            Math.abs(canvas.height - newHeight) < 2
-          ) return;
+      let timeoutId: number | null = null;
+      const redrawUploadedPreview = (
+        targetCanvas: HTMLCanvasElement,
+        targetContext: CanvasRenderingContext2D,
+      ): boolean => {
+        const uploadedImage = uploadedImageRef.current;
+        const previewSize = uploadedPreviewCssSizeRef.current;
+        if (!uploadedImage || !previewSize) {
+          return false;
+        }
 
-          const backup = document.createElement("canvas");
+        const dpr = getClampedDevicePixelRatio();
+        const drawWidth = Math.max(1, Math.round(previewSize.width * dpr));
+        const drawHeight = Math.max(1, Math.round(previewSize.height * dpr));
+        const x = (targetCanvas.width - drawWidth) / 2;
+        const y = (targetCanvas.height - drawHeight) / 2;
+
+        targetContext.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+        targetContext.imageSmoothingEnabled = true;
+        targetContext.imageSmoothingQuality = "high";
+        targetContext.drawImage(uploadedImage, x, y, drawWidth, drawHeight);
+        return true;
+      };
+
+      const applyResize = (newCssWidth: number, newCssHeight: number) => {
+        if (!newCssWidth || !newCssHeight) return;
+        const dpr = getClampedDevicePixelRatio();
+        const newWidth = Math.max(1, Math.round(newCssWidth * dpr));
+        const newHeight = Math.max(1, Math.round(newCssHeight * dpr));
+        if (
+          Math.abs(canvas.width - newWidth) < 2 &&
+          Math.abs(canvas.height - newHeight) < 2
+        ) return;
+
+        const shouldRedrawUpload = contentModeRef.current === "upload" &&
+          uploadedImageRef.current !== null &&
+          uploadedPreviewCssSizeRef.current !== null;
+        let backup: HTMLCanvasElement | null = null;
+
+        if (!shouldRedrawUpload) {
+          backup = document.createElement("canvas");
           backup.width = canvas.width;
           backup.height = canvas.height;
           const bCtx = backup.getContext("2d");
           if (bCtx) {
             bCtx.drawImage(canvas, 0, 0);
           }
+        }
 
-          canvas.width = newWidth;
-          canvas.height = newHeight;
-          const ctx = canvas.getContext("2d");
-          if (ctx) {
-            const scale = Math.min(
-              newWidth / backup.width,
-              newHeight / backup.height,
-            );
-            const scaledWidth = backup.width * scale;
-            const scaledHeight = backup.height * scale;
-            const xOffset = (newWidth - scaledWidth) / 2;
-            const yOffset = (newHeight - scaledHeight) / 2;
-            ctx.drawImage(backup, xOffset, yOffset, scaledWidth, scaledHeight);
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        if (shouldRedrawUpload && redrawUploadedPreview(canvas, ctx)) {
+          return;
+        }
+        if (!backup) {
+          return;
+        }
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        const scale = Math.min(newWidth / backup.width, newHeight / backup.height);
+        const scaledWidth = backup.width * scale;
+        const scaledHeight = backup.height * scale;
+        const xOffset = (newWidth - scaledWidth) / 2;
+        const yOffset = (newHeight - scaledHeight) / 2;
+        ctx.drawImage(backup, xOffset, yOffset, scaledWidth, scaledHeight);
+      };
+
+      const observer = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        const newCssWidth = entry.contentRect.width;
+        const newCssHeight = entry.contentRect.height;
+
+        if (contentModeRef.current === "upload") {
+          if (timeoutId !== null) {
+            window.clearTimeout(timeoutId);
+            timeoutId = null;
           }
-        }, 600);
+          applyResize(newCssWidth, newCssHeight);
+          return;
+        }
+
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId);
+        }
+        timeoutId = window.setTimeout(() => {
+          applyResize(newCssWidth, newCssHeight);
+          timeoutId = null;
+        }, 120);
       });
 
       if (parent) {
@@ -92,7 +160,9 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
 
       return () => {
         observer.disconnect();
-        window.clearTimeout(timeoutId);
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId);
+        }
       };
     }, []);
 
@@ -110,18 +180,36 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
       }
     }, [showHint]);
 
+    useEffect(() => {
+      if (!showHint) return;
+      if (!("fonts" in document)) return;
+
+      let cancelled = false;
+      document.fonts.load(`${HINT_FONT_SIZE}px "Spline Sans Mono"`).then(() => {
+        if (!cancelled && showHint) {
+          renderHint();
+        }
+      });
+
+      return () => {
+        cancelled = true;
+      };
+    }, [showHint]);
+
     const renderHint = () => {
       const canvas = canvasRef.current;
       const context = canvas?.getContext("2d");
       if (!canvas || !context || !showHint) return;
 
       context.clearRect(0, 0, canvas.width, canvas.height);
-      context.fillStyle = "#9ca3af";
-      context.font = "22px sans-serif";
+      context.fillStyle = "#828791";
+      context.font = `${
+        HINT_FONT_SIZE * getClampedDevicePixelRatio()
+      }px "Spline Sans Mono", monospace`;
       context.textAlign = "center";
       context.textBaseline = "middle";
       context.fillText(
-        "Draw to explore",
+        "*Draw to explore",
         canvas.width / 2,
         canvas.height / 2,
       );
@@ -131,6 +219,9 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
       if (isClearing) {
         setIsClearing(false);
       }
+      uploadedImageRef.current = null;
+      uploadedPreviewCssSizeRef.current = null;
+      contentModeRef.current = "drawing";
       setIsDrawing(true);
       lastPoint.current = { x, y };
 
@@ -160,7 +251,7 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
       context.moveTo(lastPoint.current.x, lastPoint.current.y);
       context.lineTo(x, y);
       context.lineCap = "round";
-      context.lineWidth = STROKE_WIDTH;
+      context.lineWidth = STROKE_WIDTH * getClampedDevicePixelRatio();
       context.strokeStyle = STROKE_COLOR;
       context.stroke();
 
@@ -265,7 +356,10 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
         clearTimeoutRef.current = window.setTimeout(() => {
           context.clearRect(0, 0, canvas.width, canvas.height);
           setHasDrawing(false);
-          setShowHint(false);
+          setShowHint(true);
+          uploadedImageRef.current = null;
+          uploadedPreviewCssSizeRef.current = null;
+          contentModeRef.current = "empty";
           setIsClearing(false);
           clearTimeoutRef.current = null;
         }, 180);
@@ -283,20 +377,39 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
           setIsClearing(false);
         }
 
+        const dpr = getClampedDevicePixelRatio();
+        const canvasCssWidth = canvas.width / dpr;
+        const canvasCssHeight = canvas.height / dpr;
+        const naturalWidth = image.naturalWidth || image.width;
+        const naturalHeight = image.naturalHeight || image.height;
+
+        const maxPreviewWidth = Math.min(canvasCssWidth * 0.82, UPLOAD_PREVIEW_MAX_CSS_SIZE);
+        const maxPreviewHeight = Math.min(canvasCssHeight * 0.82, UPLOAD_PREVIEW_MAX_CSS_SIZE);
         const scale = Math.min(
-          canvas.width / image.width,
-          canvas.height / image.height,
+          maxPreviewWidth / naturalWidth,
+          maxPreviewHeight / naturalHeight,
+          1,
         );
-        const drawWidth = image.width * scale;
-        const drawHeight = image.height * scale;
+        const drawCssWidth = naturalWidth * scale;
+        const drawCssHeight = naturalHeight * scale;
+        const drawWidth = Math.max(1, Math.round(drawCssWidth * dpr));
+        const drawHeight = Math.max(1, Math.round(drawCssHeight * dpr));
         const x = (canvas.width - drawWidth) / 2;
         const y = (canvas.height - drawHeight) / 2;
 
         context.clearRect(0, 0, canvas.width, canvas.height);
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = "high";
         context.drawImage(image, x, y, drawWidth, drawHeight);
 
         setShowHint(false);
         setHasDrawing(true);
+        uploadedImageRef.current = image;
+        uploadedPreviewCssSizeRef.current = {
+          width: drawCssWidth,
+          height: drawCssHeight,
+        };
+        contentModeRef.current = "upload";
       },
       getImageBase64: () => {
         const canvas = canvasRef.current;
@@ -316,14 +429,24 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
           cropY: crop.y,
           cropWidth: crop.width,
           cropHeight: crop.height,
+          devicePixelRatio: getClampedDevicePixelRatio(),
         });
 
+        const longestEdge = Math.max(crop.width, crop.height);
+        const exportSize = Math.min(
+          EXPORT_MAX_SIZE,
+          Math.max(EXPORT_MIN_SIZE, Math.round(longestEdge)),
+        );
+        console.log("[SketchCanvas] export target size", { exportSize });
+
         const exportCanvas = document.createElement("canvas");
-        exportCanvas.width = EXPORT_SIZE;
-        exportCanvas.height = EXPORT_SIZE;
+        exportCanvas.width = exportSize;
+        exportCanvas.height = exportSize;
         const exportContext = exportCanvas.getContext("2d");
         if (!exportContext) return "";
 
+        exportContext.imageSmoothingEnabled = true;
+        exportContext.imageSmoothingQuality = "high";
         exportContext.fillStyle = "white";
         exportContext.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
 

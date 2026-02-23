@@ -43,7 +43,7 @@ export function AnalysisPanel({
           Clear
         </button>
         <button
-          className="btn btn-primary"
+          className="btn"
           type="button"
           onClick={onAnalyze}
           disabled={isLoading}

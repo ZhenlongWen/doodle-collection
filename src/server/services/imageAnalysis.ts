@@ -18,7 +18,7 @@ export async function analyzeImageWithGPT(
             {
               type: "text",
               text:
-                "Describe the main object in this image as a short search term. Prefer one or two words.",
+                "Recognize the main object in this image, output a query term describing what does it look like, avoid words like irregular. only output the term, try to use one word to describe the most defining feature. examples: Teardrop, Tripod, Stars, Tablet, Apple, Fragments, Gourd, Woodenbox, Spikes…. If there’s people in it, describe their activity, only using one word.",
             },
             {
               type: "image_url",

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 import type { GalleryItem } from "../../lib/types";
 import "./Gallery.css";
 
@@ -7,8 +7,14 @@ interface GalleryProps {
 }
 
 export function Gallery({ items }: GalleryProps) {
+  const THUMB_BASE_WIDTH = 72;
+  const THUMB_MAX_HEIGHT = 80;
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [thumbSizes, setThumbSizes] = useState<
+    Record<string, { width: number; height: number }>
+  >({});
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const thumbnailButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
     console.log("[Gallery] items changed -> reset selectedIndex", {
@@ -50,14 +56,50 @@ export function Gallery({ items }: GalleryProps) {
       itemLength: items.length,
     });
     setSelectedIndex(nextIndex);
+    thumbnailButtonRefs.current[nextIndex]?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "nearest",
+    });
+  };
 
-    if (scrollContainerRef.current) {
-      const btnWidth = 80 + 12; // 80px width + 12px gap
-      scrollContainerRef.current.scrollTo({
-        left: nextIndex * btnWidth,
-        behavior: "smooth",
-      });
+  const handleThumbnailLoad = (
+    itemId: string,
+    event: SyntheticEvent<HTMLImageElement>,
+  ) => {
+    const image = event.currentTarget;
+    const naturalWidth = image.naturalWidth || THUMB_BASE_WIDTH;
+    const naturalHeight = image.naturalHeight || THUMB_MAX_HEIGHT;
+
+    let width = THUMB_BASE_WIDTH;
+    let height = (THUMB_BASE_WIDTH * naturalHeight) / naturalWidth;
+
+    if (height > THUMB_MAX_HEIGHT) {
+      const scale = THUMB_MAX_HEIGHT / height;
+      width = width * scale;
+      height = THUMB_MAX_HEIGHT;
     }
+
+    const nextSize = {
+      width: Math.max(1, Math.round(width)),
+      height: Math.max(1, Math.round(height)),
+    };
+
+    setThumbSizes((previous) => {
+      const existing = previous[itemId];
+      if (
+        existing &&
+        existing.width === nextSize.width &&
+        existing.height === nextSize.height
+      ) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        [itemId]: nextSize,
+      };
+    });
   };
 
   return (
@@ -81,7 +123,10 @@ export function Gallery({ items }: GalleryProps) {
           {items.map((item, idx) => (
             <button
               key={item.id}
-              className={`thumbnail-btn ${idx === activeIndex ? "active" : ""}`}
+              className="thumbnail-btn"
+              ref={(element) => {
+                thumbnailButtonRefs.current[idx] = element;
+              }}
               onClick={() => {
                 console.log("[Gallery] thumbnail clicked", {
                   clickedIndex: idx,
@@ -92,7 +137,17 @@ export function Gallery({ items }: GalleryProps) {
               aria-label={`View ${item.title}`}
             >
               {item.imageUrl
-                ? <img src={item.imageUrl} alt="" className="thumbnail-image" />
+                ? (
+                  <img
+                    src={item.imageUrl}
+                    alt=""
+                    onLoad={(event) => handleThumbnailLoad(item.id, event)}
+                    className={`thumbnail-image ${
+                      idx === activeIndex ? "is-active" : ""
+                    }`}
+                    style={thumbSizes[item.id]}
+                  />
+                )
                 : <div className="thumbnail-placeholder">No Img</div>}
             </button>
           ))}

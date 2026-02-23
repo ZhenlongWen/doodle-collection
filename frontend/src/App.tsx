@@ -20,6 +20,7 @@ export default function App() {
   const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>("idle");
   const [isExplored, setIsExplored] = useState(false);
+  const [isClearingGallery, setIsClearingGallery] = useState(false);
 
   const [dividerPhase, setDividerPhase] = useState<DividerPhase>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -27,6 +28,7 @@ export default function App() {
   const analyzeInFlightRef = useRef(false);
   const requestIdRef = useRef(0);
   const dividerTimeoutRef = useRef<number | null>(null);
+  const clearGalleryTimeoutRef = useRef<number | null>(null);
 
   const isLoading = analysisStatus === "analyzing";
 
@@ -47,6 +49,9 @@ export default function App() {
       if (dividerTimeoutRef.current !== null) {
         window.clearTimeout(dividerTimeoutRef.current);
       }
+      if (clearGalleryTimeoutRef.current !== null) {
+        window.clearTimeout(clearGalleryTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -57,6 +62,10 @@ export default function App() {
       window.clearTimeout(dividerTimeoutRef.current);
       dividerTimeoutRef.current = null;
     }
+    if (clearGalleryTimeoutRef.current !== null) {
+      window.clearTimeout(clearGalleryTimeoutRef.current);
+      clearGalleryTimeoutRef.current = null;
+    }
 
     // Invalidate any in-flight response so clear won't be overwritten by stale data.
     requestIdRef.current += 1;
@@ -64,10 +73,25 @@ export default function App() {
 
     canvasRef.current?.clear();
 
-    setAnalysis(null);
-    setGalleryItems([]);
     setErrorMessage(null);
 
+    const hasGalleryToFade = analysisStatus === "ready" && galleryItems.length > 0;
+    if (isExplored && hasGalleryToFade) {
+      setIsClearingGallery(true);
+      clearGalleryTimeoutRef.current = window.setTimeout(() => {
+        setIsClearingGallery(false);
+        setAnalysis(null);
+        setGalleryItems([]);
+        setAnalysisStatus("idle");
+        setDividerPhase("complete");
+        clearGalleryTimeoutRef.current = null;
+      }, 220);
+      return;
+    }
+
+    setIsClearingGallery(false);
+    setAnalysis(null);
+    setGalleryItems([]);
     // Keep split layout but blank gallery after clear.
     setAnalysisStatus("idle");
     setDividerPhase(isExplored ? "complete" : "idle");
@@ -216,6 +240,7 @@ export default function App() {
       setAnalysis(result.analysis);
       setGalleryItems(nextItems);
       setAnalysisStatus("ready");
+      setIsClearingGallery(false);
       setErrorMessage(null);
 
       console.log("[App] ready committed", {
@@ -259,7 +284,9 @@ export default function App() {
     >
       <section className="left-panel">
         <h1 className="app-title">Doodle Collection</h1>
-        <SketchCanvas ref={canvasRef} />
+        <div className="canvas-stage">
+          <SketchCanvas ref={canvasRef} />
+        </div>
         <div className="bottom-controls">
           <AnalysisPanel
             analysis={analysis}
@@ -274,28 +301,30 @@ export default function App() {
       <div className={`divider divider-${dividerPhase}`} />
 
       <section className="right-panel">
-        {/* ✅ 核心：右侧只按 status 渲染，不会“提前 empty” */}
-        {!isExplored && <div className="right-placeholder" />}
+        <div className={`right-content ${isClearingGallery ? "is-clearing" : ""}`}>
+          {/* ✅ 核心：右侧只按 status 渲染，不会“提前 empty” */}
+          {!isExplored && <div className="right-placeholder" />}
 
-        {isExplored && analysisStatus === "idle" && (
-          <div className="right-placeholder" />
-        )}
+          {isExplored && analysisStatus === "idle" && (
+            <div className="right-placeholder" />
+          )}
 
-        {isExplored && analysisStatus === "analyzing" && (
-          <div className="right-loading">Analyzing…</div>
-        )}
+          {isExplored && analysisStatus === "analyzing" && (
+            <div className="right-loading">Analyzing…</div>
+          )}
 
-        {isExplored && analysisStatus === "ready" && galleryItems.length > 0 &&
-          <Gallery items={galleryItems} />}
+          {isExplored && analysisStatus === "ready" && galleryItems.length > 0 &&
+            <Gallery items={galleryItems} />}
 
-        {isExplored && analysisStatus === "ready" &&
-          galleryItems.length === 0 && (
-          <div className="right-empty">No object found</div>
-        )}
+          {isExplored && analysisStatus === "ready" &&
+            galleryItems.length === 0 && (
+            <div className="right-empty">No object found</div>
+          )}
 
-        {isExplored && analysisStatus === "error" && (
-          <div className="right-error">{errorMessage ?? "Error"}</div>
-        )}
+          {isExplored && analysisStatus === "error" && (
+            <div className="right-error">{errorMessage ?? "Error"}</div>
+          )}
+        </div>
       </section>
     </main>
   );

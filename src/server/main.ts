@@ -6,6 +6,7 @@ import type { AnalyzeResponse } from "./types.ts";
 
 const app = new Application();
 const router = new Router();
+const isProduction = Deno.env.get("DENO_ENV") === "production";
 
 app.use(async (context, next) => {
   const start = Date.now();
@@ -48,19 +49,41 @@ router.post("/api/analyze", async (context) => {
 
 app.use(router.routes());
 app.use(router.allowedMethods());
-app.use(async (context, next) => {
-  try {
-    await context.send({
-      root: `${Deno.cwd()}/frontend/dist`,
-      index: "index.html",
-    });
-  } catch {
-    await next();
-  }
-});
+
+if (isProduction) {
+  app.use(async (context, next) => {
+    try {
+      await context.send({
+        root: `${Deno.cwd()}/frontend/dist`,
+        index: "index.html",
+      });
+    } catch {
+      await next();
+    }
+  });
+}
 
 const abortController = new AbortController();
-Deno.addSignalListener("SIGINT", () => abortController.abort());
+let isShuttingDown = false;
+
+const shutdown = () => {
+  if (isShuttingDown) {
+    return;
+  }
+  isShuttingDown = true;
+  abortController.abort();
+};
+
+const shutdownSignals: Deno.Signal[] = ["SIGINT", "SIGTERM"];
+for (const signal of shutdownSignals) {
+  Deno.addSignalListener(signal, shutdown);
+}
 
 console.log(`Server running on http://localhost:${SERVER_PORT}`);
-await app.listen({ port: SERVER_PORT, signal: abortController.signal });
+try {
+  await app.listen({ port: SERVER_PORT, signal: abortController.signal });
+} finally {
+  for (const signal of shutdownSignals) {
+    Deno.removeSignalListener(signal, shutdown);
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "webapp-starter-root",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c cyan,magenta \"deno task dev:server\" \"deno task dev:client\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

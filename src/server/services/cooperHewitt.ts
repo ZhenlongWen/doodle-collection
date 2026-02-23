@@ -100,5 +100,14 @@ export async function searchCooperHewittAPI(
     ? data.data.object
     : [];
 
+  const rawCount = records.length;
+  const returnedCount = Math.min(rawCount, 12);
+
+  console.log("[CooperHewitt] search completed", {
+    queryText,
+    rawCount,
+    returnedCount,
+  });
+
   return records.slice(0, 12).map(normalizeRecord);
 }
