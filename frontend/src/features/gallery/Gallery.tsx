@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type SyntheticEvent } from "react";
+import { useRef, useState, type SyntheticEvent } from "react";
 import type { GalleryItem } from "../../lib/types";
 import "./Gallery.css";
 
@@ -15,14 +15,6 @@ export function Gallery({ items }: GalleryProps) {
   >({});
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const thumbnailButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
-
-  useEffect(() => {
-    console.log("[Gallery] items changed -> reset selectedIndex", {
-      itemLength: items.length,
-      previousSelectedIndex: selectedIndex,
-    });
-    setSelectedIndex(0);
-  }, [items]);
 
   const activeIndex = selectedIndex < items.length ? selectedIndex : 0;
 

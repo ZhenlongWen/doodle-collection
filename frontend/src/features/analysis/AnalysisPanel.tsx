@@ -1,24 +1,31 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 
 interface AnalysisPanelProps {
-  analysis: string | null;
   isLoading: boolean;
-  onAnalyze: () => void;
+  onPrimaryAction: () => void;
+  onBackToArchive: () => void;
+  onOpenHistory: () => void;
   onClear: () => void;
   onUpload: (image: HTMLImageElement) => void;
+  primaryButtonLabel: string;
+  isPrimaryDisabled: boolean;
+  isPrimaryCta: boolean;
+  primaryTooltip?: string;
 }
 
 export function AnalysisPanel({
-  analysis,
   isLoading,
-  onAnalyze,
+  onPrimaryAction,
+  onBackToArchive,
+  onOpenHistory,
   onClear,
   onUpload,
+  primaryButtonLabel,
+  isPrimaryDisabled,
+  isPrimaryCta,
+  primaryTooltip,
 }: AnalysisPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    // Analysis is not shown in the panel anymore
-  }, [analysis, isLoading]);
 
   const handleUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -39,16 +46,28 @@ export function AnalysisPanel({
   return (
     <section className="analysis-panel">
       <div className="controls-row">
-        <button className="btn" type="button" onClick={onClear}>
-          Clear
-        </button>
         <button
-          className="btn"
+          className="icon-btn"
           type="button"
-          onClick={onAnalyze}
-          disabled={isLoading}
+          onClick={onBackToArchive}
+          aria-label="Back to archive"
+          title="Back to archive"
         >
-          {isLoading ? "Analyzing..." : "Explore"}
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M14.5 5.5L8 12L14.5 18.5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
         </button>
         <button
           className="btn"
@@ -56,6 +75,21 @@ export function AnalysisPanel({
           onClick={() => fileInputRef.current?.click()}
         >
           Upload
+        </button>
+        <button className="btn" type="button" onClick={onClear}>
+          Clear
+        </button>
+        <button
+          className={isPrimaryCta ? "workspace-cta action-tooltip" : "btn"}
+          type="button"
+          onClick={onPrimaryAction}
+          disabled={isPrimaryDisabled}
+          data-tooltip={primaryTooltip}
+        >
+          {isLoading ? "Submitting..." : primaryButtonLabel}
+        </button>
+        <button className="btn" type="button" onClick={onOpenHistory}>
+          History
         </button>
       </div>
 

@@ -1,0 +1,81 @@
+.history-panel {
+  width: 100%;
+  height: 100%;
+  padding: 112px 44px 138px;
+  overflow-y: auto;
+}
+
+.history-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 42px 44px;
+  align-items: start;
+}
+
+.history-sketch-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.history-sketch-artwork {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.history-sketch-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background: white;
+}
+
+.history-sketch-btn.is-selected .history-sketch-artwork {
+  background: #2c76ff;
+}
+
+.history-sketch-btn.is-selected .history-sketch-image {
+  mix-blend-mode: screen;
+}
+
+.history-empty-panel {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: #6b7280;
+  text-align: center;
+  padding: 120px 24px 140px;
+}
+
+.history-bottom-actions {
+  position: absolute;
+  bottom: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  justify-content: center;
+  width: min(calc(100% - 24px), 720px);
+}
+
+@media (max-width: 900px) {
+  .history-panel {
+    padding: 92px 24px 112px;
+  }
+
+  .history-grid {
+    gap: 28px 24px;
+  }
+
+  .history-bottom-actions {
+    bottom: 28px;
+    width: min(calc(100% - 20px), 720px);
+  }
+}

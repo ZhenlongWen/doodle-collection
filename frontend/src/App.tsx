@@ -1,29 +1,61 @@
+import { onAuthStateChanged, type User } from "firebase/auth";
 import { useEffect, useRef, useState } from "react";
-import { AnalysisPanel } from "./features/analysis/AnalysisPanel";
-import {
-  SketchCanvas,
-  type SketchCanvasHandle,
-} from "./features/canvas/SketchCanvas";
-import { Gallery } from "./features/gallery/Gallery";
+import "./features/app/AppShell.css";
+import { ArchiveLanding } from "./features/archive/ArchiveLanding";
+import { CollectionModal } from "./features/archive/CollectionModal";
+import { type SketchCanvasHandle } from "./features/canvas/SketchCanvas";
+import { ExploreWorkspace } from "./features/explore/ExploreWorkspace";
 import { analyzeImage } from "./lib/api";
-import type { GalleryItem } from "./lib/types";
+import {
+  addSharedArchiveEntry,
+  auth,
+  ensureAnonymousUser,
+  getFirebaseErrorMessage,
+  saveHistoryEntry,
+  subscribeSharedArchive,
+  subscribeUserHistory,
+} from "./lib/firebase";
+import type { CollectionRecord, GalleryItem } from "./lib/types";
 
 type AnalysisStatus = "idle" | "analyzing" | "ready" | "error";
+type AuthStatus = "authenticating" | "ready" | "error";
+type SaveState = "idle" | "saving" | "saved" | "error";
 type DividerPhase = "idle" | "resetting" | "loading" | "complete";
+type ViewMode = "archive" | "explore";
+type WorkspaceMode = "draw" | "history";
+
+interface CurrentResult {
+  drawingImageDataUrl: string;
+  analysis: string;
+  galleryItems: GalleryItem[];
+}
 
 const raf = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
 export default function App() {
   const canvasRef = useRef<SketchCanvasHandle>(null);
 
-  const [analysis, setAnalysis] = useState<string | null>(null);
   const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>("idle");
+  const [authStatus, setAuthStatus] = useState<AuthStatus>("authenticating");
+  const [viewMode, setViewMode] = useState<ViewMode>("archive");
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("draw");
   const [isExplored, setIsExplored] = useState(false);
   const [isClearingGallery, setIsClearingGallery] = useState(false);
-
   const [dividerPhase, setDividerPhase] = useState<DividerPhase>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [authErrorMessage, setAuthErrorMessage] = useState<string | null>(null);
+  const [sharedArchiveItems, setSharedArchiveItems] = useState<CollectionRecord[]>([]);
+  const [historyItems, setHistoryItems] = useState<CollectionRecord[]>([]);
+  const [isSharedArchiveLoading, setIsSharedArchiveLoading] = useState(true);
+  const [, setIsHistoryLoading] = useState(true);
+  const [selectedRecord, setSelectedRecord] = useState<CollectionRecord | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentResult, setCurrentResult] = useState<CurrentResult | null>(null);
+  const [latestHistoryEntry, setLatestHistoryEntry] = useState<CollectionRecord | null>(null);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+  const [historySaveState, setHistorySaveState] = useState<SaveState>("idle");
+  const [collectionSaveState, setCollectionSaveState] = useState<SaveState>("idle");
 
   const analyzeInFlightRef = useRef(false);
   const requestIdRef = useRef(0);
@@ -35,6 +67,9 @@ export default function App() {
   const logState = (label: string, extra?: Record<string, unknown>) => {
     console.log(`[App] ${label}`, {
       analysisStatus,
+      authStatus,
+      viewMode,
+      workspaceMode,
       isExplored,
       resultLength: galleryItems.length,
       dividerPhase,
@@ -43,6 +78,77 @@ export default function App() {
       ...extra,
     });
   };
+
+  useEffect(() => {
+    setAuthStatus("authenticating");
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+
+      if (user) {
+        setAuthStatus("ready");
+        setAuthErrorMessage(null);
+      }
+    });
+
+    ensureAnonymousUser().catch((error) => {
+      console.error("[App] anonymous auth failed", error);
+      setAuthStatus("error");
+      setAuthErrorMessage(getFirebaseErrorMessage(error));
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeSharedArchive(
+      (items) => {
+        setSharedArchiveItems(items);
+        setIsSharedArchiveLoading(false);
+      },
+      (error) => {
+        console.error("[App] shared archive subscription failed", error);
+        setIsSharedArchiveLoading(false);
+      },
+    );
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setHistoryItems([]);
+      setIsHistoryLoading(false);
+      return;
+    }
+
+    setIsHistoryLoading(true);
+    const unsubscribe = subscribeUserHistory(
+      currentUser.uid,
+      (items) => {
+        setHistoryItems(items);
+        setIsHistoryLoading(false);
+      },
+      (error) => {
+        console.error("[App] history subscription failed", error);
+        setIsHistoryLoading(false);
+      },
+    );
+
+    return unsubscribe;
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (historyItems.length === 0) {
+      setSelectedHistoryId(null);
+      return;
+    }
+
+    const selectedStillExists = historyItems.some((item) => item.id === selectedHistoryId);
+    if (!selectedStillExists) {
+      setSelectedHistoryId(historyItems[0].id);
+    }
+  }, [historyItems, selectedHistoryId]);
 
   useEffect(() => {
     return () => {
@@ -74,13 +180,16 @@ export default function App() {
     canvasRef.current?.clear();
 
     setErrorMessage(null);
+    setCurrentResult(null);
+    setLatestHistoryEntry(null);
+    setHistorySaveState("idle");
+    setCollectionSaveState("idle");
 
     const hasGalleryToFade = analysisStatus === "ready" && galleryItems.length > 0;
     if (isExplored && hasGalleryToFade) {
       setIsClearingGallery(true);
       clearGalleryTimeoutRef.current = window.setTimeout(() => {
         setIsClearingGallery(false);
-        setAnalysis(null);
         setGalleryItems([]);
         setAnalysisStatus("idle");
         setDividerPhase("complete");
@@ -90,12 +199,13 @@ export default function App() {
     }
 
     setIsClearingGallery(false);
-    setAnalysis(null);
     setGalleryItems([]);
     // Keep split layout but blank gallery after clear.
     setAnalysisStatus("idle");
     setDividerPhase(isExplored ? "complete" : "idle");
   };
+
+  const selectedHistoryItem = historyItems.find((item) => item.id === selectedHistoryId) ?? null;
 
   const startDividerLoading = (
     requestId: number,
@@ -174,6 +284,10 @@ export default function App() {
     // ✅ 进入 analyzing：右侧显示 loading，不会再显示 “No object found”
     setAnalysisStatus("analyzing");
     setErrorMessage(null);
+    setCurrentResult(null);
+    setLatestHistoryEntry(null);
+    setHistorySaveState("idle");
+    setCollectionSaveState("idle");
 
     // ✅ 动效：重置并开始 loading
     startDividerLoading(requestId, splitViewAlreadyActive);
@@ -184,18 +298,18 @@ export default function App() {
       let nextItems: GalleryItem[] = [];
       let finalAttempt = 0;
 
-      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        // ✅ 关键稳定性修复：等一帧，让 canvas 最后一笔先渲染完成
-        await raf();
+      await raf();
 
-        const payload = canvasRef.current.getImageBase64();
+      const drawingImageDataUrl = canvasRef.current.getImageBase64();
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         console.log("[App] analysis request sent", {
           requestId,
           attempt,
-          payloadLength: payload.length,
+          payloadLength: drawingImageDataUrl.length,
         });
 
-        const attemptResult = await analyzeImage(payload);
+        const attemptResult = await analyzeImage(drawingImageDataUrl);
 
         console.log("[App] analysis response received", {
           requestId,
@@ -237,11 +351,19 @@ export default function App() {
       // ✅ 结果 ready：divider 迅速完成
       completeDivider();
 
-      setAnalysis(result.analysis);
       setGalleryItems(nextItems);
       setAnalysisStatus("ready");
       setIsClearingGallery(false);
       setErrorMessage(null);
+
+      const nextResult: CurrentResult = {
+        drawingImageDataUrl,
+        analysis: result.analysis,
+        galleryItems: nextItems,
+      };
+
+      setCurrentResult(nextResult);
+      void persistHistoryEntry(nextResult, requestId);
 
       console.log("[App] ready committed", {
         requestId,
@@ -262,7 +384,6 @@ export default function App() {
       completeDivider();
       setAnalysisStatus("error");
       setErrorMessage("Something went wrong while analyzing the image.");
-      setAnalysis("Something went wrong while analyzing the image.");
     } finally {
       if (requestId === requestIdRef.current) {
         analyzeInFlightRef.current = false;
@@ -276,56 +397,184 @@ export default function App() {
     }
   };
 
+  const persistHistoryEntry = async (
+    result: CurrentResult,
+    requestId: number,
+  ) => {
+    if (!currentUser) {
+      return;
+    }
+
+    setHistorySaveState("saving");
+
+    try {
+      const entry = await saveHistoryEntry(currentUser.uid, {
+        drawingImageDataUrl: result.drawingImageDataUrl,
+        analysis: result.analysis,
+        galleryItems: result.galleryItems,
+      });
+
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
+      setLatestHistoryEntry(entry);
+      setHistorySaveState("saved");
+    } catch (error) {
+      console.error("[App] history save failed", error);
+
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
+      setHistorySaveState("error");
+    }
+  };
+
+  const handleAddToCollection = async () => {
+    if (!currentUser || !currentResult) {
+      return;
+    }
+
+    setCollectionSaveState("saving");
+
+    try {
+      await addSharedArchiveEntry(currentUser.uid, {
+        drawingImageUrl: latestHistoryEntry?.drawingImageUrl,
+        drawingImageDataUrl: latestHistoryEntry
+          ? undefined
+          : currentResult.drawingImageDataUrl,
+        analysis: currentResult.analysis,
+        galleryItems: currentResult.galleryItems,
+      });
+
+      setCollectionSaveState("saved");
+    } catch (error) {
+      console.error("[App] collection save failed", error);
+      setCollectionSaveState("error");
+    }
+  };
+
+  if (authStatus === "authenticating") {
+    return (
+      <main className="app-page app-page-center">
+        <div className="session-card">
+          <p className="session-kicker">Doodle Collection</p>
+          <h1 className="session-title">Starting your anonymous archive...</h1>
+        </div>
+      </main>
+    );
+  }
+
+  if (authStatus === "error") {
+    return (
+      <main className="app-page app-page-center">
+        <div className="session-card">
+          <p className="session-kicker">Firebase</p>
+          <h1 className="session-title">We could not start the anonymous session.</h1>
+          <p className="session-copy">{authErrorMessage ?? "Please try again."}</p>
+        </div>
+      </main>
+    );
+  }
+
+  const isReadyToAdd = analysisStatus === "ready" && currentResult !== null;
+
+  const primaryButtonLabel =
+    collectionSaveState === "saving"
+      ? "Adding..."
+      : collectionSaveState === "saved"
+      ? "Added"
+      : isReadyToAdd
+      ? "Add"
+      : "Submit";
+
+  const primaryButtonTooltip =
+    isReadyToAdd && collectionSaveState !== "saving" && collectionSaveState !== "saved"
+      ? "Add this sketch to shared archive"
+      : undefined;
+
+  const handlePrimaryAction = () => {
+    if (isReadyToAdd) {
+      void handleAddToCollection();
+      return;
+    }
+
+    void handleAnalyze();
+  };
+
+  const handleOpenHistory = () => {
+    setWorkspaceMode("history");
+    setViewMode("explore");
+    setIsExplored(true);
+    setDividerPhase("complete");
+  };
+
+  const handleExitHistoryMode = () => {
+    setWorkspaceMode("draw");
+  };
+
+  const workspaceStatusMessage =
+    collectionSaveState === "saved"
+      ? "Added to the shared archive."
+      : collectionSaveState === "error"
+      ? "Could not add this drawing to the shared archive."
+      : historySaveState === "saving"
+      ? "Saving this search to your history..."
+      : historySaveState === "error"
+      ? "Could not save this search to history."
+      : historySaveState === "saved"
+      ? "Saved to your history."
+      : null;
+
   return (
-    <main
-      className={`app-shell ${isExplored ? "is-explored" : "is-initial"} ${
-        isLoading ? "is-analyzing" : ""
-      }`}
-    >
-      <section className="left-panel">
-        <h1 className="app-title">Doodle Collection</h1>
-        <div className="canvas-stage">
-          <SketchCanvas ref={canvasRef} />
-        </div>
-        <div className="bottom-controls">
-          <AnalysisPanel
-            analysis={analysis}
-            isLoading={isLoading}
-            onAnalyze={handleAnalyze}
-            onClear={handleClear}
-            onUpload={(image) => canvasRef.current?.drawImage(image)}
-          />
-        </div>
-      </section>
+    <>
+      {viewMode === "archive" && (
+        <ArchiveLanding
+          items={sharedArchiveItems}
+          isLoading={isSharedArchiveLoading}
+          onSelect={setSelectedRecord}
+          onExplore={() => setViewMode("explore")}
+        />
+      )}
 
-      <div className={`divider divider-${dividerPhase}`} />
+      {viewMode === "explore" && (
+        <ExploreWorkspace
+          canvasRef={canvasRef}
+          isExplored={isExplored}
+          workspaceMode={workspaceMode}
+          isLoading={isLoading}
+          dividerPhase={dividerPhase}
+          isClearingGallery={isClearingGallery}
+          analysisStatus={analysisStatus}
+          galleryItems={galleryItems}
+          historyItems={historyItems}
+          selectedHistoryId={selectedHistoryId}
+          selectedHistoryItem={selectedHistoryItem}
+          errorMessage={errorMessage}
+          primaryButtonLabel={primaryButtonLabel}
+          isPrimaryDisabled={
+            isLoading ||
+            collectionSaveState === "saving" ||
+            collectionSaveState === "saved"
+          }
+          isPrimaryCta={isReadyToAdd}
+          primaryTooltip={primaryButtonTooltip}
+          workspaceStatusMessage={workspaceStatusMessage}
+          onPrimaryAction={handlePrimaryAction}
+          onBackToArchive={() => {
+            setViewMode("archive");
+            setWorkspaceMode("draw");
+          }}
+          onOpenHistory={handleOpenHistory}
+          onSelectHistoryItem={(item) => setSelectedHistoryId(item.id)}
+          onExitHistoryMode={handleExitHistoryMode}
+          onClear={handleClear}
+          onUpload={(image) => canvasRef.current?.drawImage(image)}
+        />
+      )}
 
-      <section className="right-panel">
-        <div className={`right-content ${isClearingGallery ? "is-clearing" : ""}`}>
-          {/* ✅ 核心：右侧只按 status 渲染，不会“提前 empty” */}
-          {!isExplored && <div className="right-placeholder" />}
-
-          {isExplored && analysisStatus === "idle" && (
-            <div className="right-placeholder" />
-          )}
-
-          {isExplored && analysisStatus === "analyzing" && (
-            <div className="right-loading">Analyzing…</div>
-          )}
-
-          {isExplored && analysisStatus === "ready" && galleryItems.length > 0 &&
-            <Gallery items={galleryItems} />}
-
-          {isExplored && analysisStatus === "ready" &&
-            galleryItems.length === 0 && (
-            <div className="right-empty">No object found</div>
-          )}
-
-          {isExplored && analysisStatus === "error" && (
-            <div className="right-error">{errorMessage ?? "Error"}</div>
-          )}
-        </div>
-      </section>
-    </main>
+      <CollectionModal item={selectedRecord} onClose={() => setSelectedRecord(null)} />
+    </>
   );
 }

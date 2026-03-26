@@ -13,3 +13,12 @@ export interface AnalyzeResponse {
   analysis: string;
   galleryItems: GalleryItem[];
 }
+
+export interface CollectionRecord {
+  id: string;
+  drawingImageUrl: string;
+  analysis: string;
+  galleryItems: GalleryItem[];
+  createdAtMs: number;
+  authorUid?: string;
+}

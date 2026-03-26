@@ -13,3 +13,27 @@
   font-style: normal;
   font-display: swap;
 }
+
+:root {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  color: #111827;
+  background: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}

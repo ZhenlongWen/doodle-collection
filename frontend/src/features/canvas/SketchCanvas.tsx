@@ -41,6 +41,25 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
     const uploadedImageRef = useRef<HTMLImageElement | null>(null);
     const uploadedPreviewCssSizeRef = useRef<{ width: number; height: number } | null>(null);
 
+    function drawHint(shouldShowHint: boolean) {
+      const canvas = canvasRef.current;
+      const context = canvas?.getContext("2d");
+      if (!canvas || !context || !shouldShowHint) return;
+
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#828791";
+      context.font = `${
+        HINT_FONT_SIZE * getClampedDevicePixelRatio()
+      }px "Spline Sans Mono", monospace`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(
+        "*Draw to explore",
+        canvas.width / 2,
+        canvas.height / 2,
+      );
+    }
+
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -58,7 +77,7 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
       }
       canvas.style.touchAction = "none";
 
-      renderHint();
+      drawHint(true);
 
       let timeoutId: number | null = null;
       const redrawUploadedPreview = (
@@ -176,7 +195,7 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
 
     useEffect(() => {
       if (showHint) {
-        renderHint();
+        drawHint(showHint);
       }
     }, [showHint]);
 
@@ -187,7 +206,7 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
       let cancelled = false;
       document.fonts.load(`${HINT_FONT_SIZE}px "Spline Sans Mono"`).then(() => {
         if (!cancelled && showHint) {
-          renderHint();
+          drawHint(showHint);
         }
       });
 
@@ -195,25 +214,6 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
         cancelled = true;
       };
     }, [showHint]);
-
-    const renderHint = () => {
-      const canvas = canvasRef.current;
-      const context = canvas?.getContext("2d");
-      if (!canvas || !context || !showHint) return;
-
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      context.fillStyle = "#828791";
-      context.font = `${
-        HINT_FONT_SIZE * getClampedDevicePixelRatio()
-      }px "Spline Sans Mono", monospace`;
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      context.fillText(
-        "*Draw to explore",
-        canvas.width / 2,
-        canvas.height / 2,
-      );
-    };
 
     const beginDrawing = (x: number, y: number) => {
       if (isClearing) {

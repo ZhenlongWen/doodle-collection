@@ -167,7 +167,21 @@ export const config = {
   maxDuration: 60,
 };
 
-export default async function handler(req: any, res: any) {
+interface VercelRequestLike {
+  method?: string;
+  body?: unknown;
+}
+
+interface VercelResponseLike {
+  status: (code: number) => {
+    json: (body: Record<string, unknown>) => void;
+  };
+}
+
+export default async function handler(
+  req: VercelRequestLike,
+  res: VercelResponseLike,
+) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
     return;
