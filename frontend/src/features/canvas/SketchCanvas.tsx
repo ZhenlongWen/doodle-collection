@@ -5,9 +5,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { TextureBrush, type Point } from "./textureBrush";
 
-const STROKE_COLOR = "#0f172a";
-const STROKE_WIDTH = 3;
 const EXPORT_MIN_SIZE = 1024;
 const EXPORT_MAX_SIZE = 1600;
 const EXPORT_PADDING = 36;
@@ -37,9 +36,13 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
     const [isClearing, setIsClearing] = useState(false);
     const [showHint, setShowHint] = useState(true);
     const lastPoint = useRef({ x: 0, y: 0 });
+    const lastSampleTimeRef = useRef(0);
+    const textureBrushRef = useRef(new TextureBrush());
     const contentModeRef = useRef<"empty" | "drawing" | "upload">("empty");
     const uploadedImageRef = useRef<HTMLImageElement | null>(null);
-    const uploadedPreviewCssSizeRef = useRef<{ width: number; height: number } | null>(null);
+    const uploadedPreviewCssSizeRef = useRef<
+      { width: number; height: number } | null
+    >(null);
 
     function drawHint(shouldShowHint: boolean) {
       const canvas = canvasRef.current;
@@ -142,7 +145,10 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
 
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = "high";
-        const scale = Math.min(newWidth / backup.width, newHeight / backup.height);
+        const scale = Math.min(
+          newWidth / backup.width,
+          newHeight / backup.height,
+        );
         const scaledWidth = backup.width * scale;
         const scaledHeight = backup.height * scale;
         const xOffset = (newWidth - scaledWidth) / 2;
@@ -194,6 +200,10 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
     }, []);
 
     useEffect(() => {
+      return textureBrushRef.current.load();
+    }, []);
+
+    useEffect(() => {
       if (showHint) {
         drawHint(showHint);
       }
@@ -215,6 +225,20 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
       };
     }, [showHint]);
 
+    const drawTextureBrushStroke = (
+      context: CanvasRenderingContext2D,
+      from: Point,
+      to: Point,
+      speed: number,
+    ) => {
+      textureBrushRef.current.drawStroke(
+        context,
+        from,
+        to,
+        speed,
+        getClampedDevicePixelRatio(),
+      );
+    };
     const beginDrawing = (x: number, y: number) => {
       if (isClearing) {
         setIsClearing(false);
@@ -234,6 +258,14 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
         }
       }
 
+      const canvas = canvasRef.current;
+      const context = canvas?.getContext("2d");
+      if (canvas && context) {
+        drawTextureBrushStroke(context, { x, y }, { x, y }, 0);
+      }
+
+      lastSampleTimeRef.current = performance.now();
+
       if (!hasDrawing) {
         setHasDrawing(true);
         onDrawStart?.();
@@ -247,19 +279,29 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
       const context = canvas?.getContext("2d");
       if (!canvas || !context) return;
 
-      context.beginPath();
-      context.moveTo(lastPoint.current.x, lastPoint.current.y);
-      context.lineTo(x, y);
-      context.lineCap = "round";
-      context.lineWidth = STROKE_WIDTH * getClampedDevicePixelRatio();
-      context.strokeStyle = STROKE_COLOR;
-      context.stroke();
+      const now = performance.now();
+      const elapsed = Math.max(16, now - lastSampleTimeRef.current || 16);
+      const dx = x - lastPoint.current.x;
+      const dy = y - lastPoint.current.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance < 0.08) {
+        return;
+      }
+
+      drawTextureBrushStroke(
+        context,
+        lastPoint.current,
+        { x, y },
+        distance / elapsed,
+      );
 
       lastPoint.current = { x, y };
+      lastSampleTimeRef.current = now;
     };
 
     const endDrawing = () => {
       setIsDrawing(false);
+      lastSampleTimeRef.current = 0;
     };
 
     const getPointFromMouse = (event: React.MouseEvent) => {
@@ -383,8 +425,14 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
         const naturalWidth = image.naturalWidth || image.width;
         const naturalHeight = image.naturalHeight || image.height;
 
-        const maxPreviewWidth = Math.min(canvasCssWidth * 0.82, UPLOAD_PREVIEW_MAX_CSS_SIZE);
-        const maxPreviewHeight = Math.min(canvasCssHeight * 0.82, UPLOAD_PREVIEW_MAX_CSS_SIZE);
+        const maxPreviewWidth = Math.min(
+          canvasCssWidth * 0.82,
+          UPLOAD_PREVIEW_MAX_CSS_SIZE,
+        );
+        const maxPreviewHeight = Math.min(
+          canvasCssHeight * 0.82,
+          UPLOAD_PREVIEW_MAX_CSS_SIZE,
+        );
         const scale = Math.min(
           maxPreviewWidth / naturalWidth,
           maxPreviewHeight / naturalHeight,
