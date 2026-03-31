@@ -24,14 +24,24 @@ import {
 } from "firebase/storage";
 import type { CollectionRecord, GalleryItem } from "./types";
 
+function getFirebaseEnv(name: keyof ImportMetaEnv): string {
+  const value = import.meta.env[name];
+
+  if (!value) {
+    throw new Error(`Missing Firebase environment variable: ${name}`);
+  }
+
+  return value;
+}
+
 const firebaseConfig = {
-  apiKey: "AIzaSyCJOjCqTm1kS2fcIUz7stdbA2PV13uG6Fc",
-  authDomain: "doodle-collection.firebaseapp.com",
-  projectId: "doodle-collection",
-  storageBucket: "doodle-collection.firebasestorage.app",
-  messagingSenderId: "965795036190",
-  appId: "1:965795036190:web:594300c05ce73c1920c20f",
-  measurementId: "G-ZV1EE5R8RZ",
+  apiKey: getFirebaseEnv("VITE_FIREBASE_API_KEY"),
+  authDomain: getFirebaseEnv("VITE_FIREBASE_AUTH_DOMAIN"),
+  projectId: getFirebaseEnv("VITE_FIREBASE_PROJECT_ID"),
+  storageBucket: getFirebaseEnv("VITE_FIREBASE_STORAGE_BUCKET"),
+  messagingSenderId: getFirebaseEnv("VITE_FIREBASE_MESSAGING_SENDER_ID"),
+  appId: getFirebaseEnv("VITE_FIREBASE_APP_ID"),
+  measurementId: getFirebaseEnv("VITE_FIREBASE_MEASUREMENT_ID"),
 };
 
 const app = initializeApp(firebaseConfig);
