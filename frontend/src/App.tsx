@@ -1,6 +1,7 @@
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { useEffect, useRef, useState } from "react";
 import "./features/app/AppShell.css";
+import { AnalysisPanel } from "./features/analysis/AnalysisPanel";
 import { ArchiveLanding } from "./features/archive/ArchiveLanding";
 import { CollectionModal } from "./features/archive/CollectionModal";
 import { type SketchCanvasHandle } from "./features/canvas/SketchCanvas";
@@ -23,6 +24,8 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type DividerPhase = "idle" | "resetting" | "loading" | "complete";
 type ViewMode = "archive" | "explore";
 type WorkspaceMode = "draw" | "history";
+type LayoutMode = "full" | "split";
+type ControlsMode = "archive" | "draw" | "history";
 
 interface CurrentResult {
   drawingImageDataUrl: string;
@@ -40,11 +43,10 @@ export default function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>("authenticating");
   const [viewMode, setViewMode] = useState<ViewMode>("archive");
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("draw");
-  const [isExplored, setIsExplored] = useState(false);
   const [isClearingGallery, setIsClearingGallery] = useState(false);
   const [dividerPhase, setDividerPhase] = useState<DividerPhase>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [authErrorMessage, setAuthErrorMessage] = useState<string | null>(null);
+  const [, setAuthErrorMessage] = useState<string | null>(null);
   const [sharedArchiveItems, setSharedArchiveItems] = useState<CollectionRecord[]>([]);
   const [historyItems, setHistoryItems] = useState<CollectionRecord[]>([]);
   const [isSharedArchiveLoading, setIsSharedArchiveLoading] = useState(true);
@@ -54,15 +56,40 @@ export default function App() {
   const [currentResult, setCurrentResult] = useState<CurrentResult | null>(null);
   const [latestHistoryEntry, setLatestHistoryEntry] = useState<CollectionRecord | null>(null);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
-  const [historySaveState, setHistorySaveState] = useState<SaveState>("idle");
+  const [, setHistorySaveState] = useState<SaveState>("idle");
   const [collectionSaveState, setCollectionSaveState] = useState<SaveState>("idle");
 
   const analyzeInFlightRef = useRef(false);
   const requestIdRef = useRef(0);
   const dividerTimeoutRef = useRef<number | null>(null);
   const clearGalleryTimeoutRef = useRef<number | null>(null);
+  const canvasSnapshotRef = useRef<string | null>(null);
+  const controlsTransitionTimeoutRef = useRef<number | null>(null);
+  const dividerRevealTimeoutRef = useRef<number | null>(null);
+  const previousLayoutModeRef = useRef<LayoutMode>("full");
+  const [displayedControlsMode, setDisplayedControlsMode] = useState<ControlsMode>("archive");
+  const [exitingControlsMode, setExitingControlsMode] = useState<ControlsMode | null>(null);
+  const [animateDividerReveal, setAnimateDividerReveal] = useState(false);
 
   const isLoading = analysisStatus === "analyzing";
+  const isExplored =
+    historyItems.length > 0 ||
+    workspaceMode === "history" ||
+    analysisStatus !== "idle" ||
+    galleryItems.length > 0 ||
+    isClearingGallery;
+  const layoutMode: LayoutMode =
+    viewMode === "archive"
+      ? "full"
+      : isExplored
+      ? "split"
+      : "full";
+  const controlsMode: ControlsMode =
+    viewMode === "archive"
+      ? "archive"
+      : workspaceMode === "history"
+      ? "history"
+      : "draw";
 
   const logState = (label: string, extra?: Record<string, unknown>) => {
     console.log(`[App] ${label}`, {
@@ -158,8 +185,54 @@ export default function App() {
       if (clearGalleryTimeoutRef.current !== null) {
         window.clearTimeout(clearGalleryTimeoutRef.current);
       }
+      if (controlsTransitionTimeoutRef.current !== null) {
+        window.clearTimeout(controlsTransitionTimeoutRef.current);
+      }
+      if (dividerRevealTimeoutRef.current !== null) {
+        window.clearTimeout(dividerRevealTimeoutRef.current);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (controlsMode === displayedControlsMode) {
+      return;
+    }
+
+    if (controlsTransitionTimeoutRef.current !== null) {
+      window.clearTimeout(controlsTransitionTimeoutRef.current);
+    }
+
+    setExitingControlsMode(displayedControlsMode);
+    setDisplayedControlsMode(controlsMode);
+
+    controlsTransitionTimeoutRef.current = window.setTimeout(() => {
+      setExitingControlsMode(null);
+      controlsTransitionTimeoutRef.current = null;
+    }, 380);
+  }, [controlsMode, displayedControlsMode]);
+
+  useEffect(() => {
+    const previousLayoutMode = previousLayoutModeRef.current;
+
+    if (
+      previousLayoutMode === "full" &&
+      layoutMode === "split" &&
+      analysisStatus === "idle"
+    ) {
+      if (dividerRevealTimeoutRef.current !== null) {
+        window.clearTimeout(dividerRevealTimeoutRef.current);
+      }
+
+      setAnimateDividerReveal(true);
+      dividerRevealTimeoutRef.current = window.setTimeout(() => {
+        setAnimateDividerReveal(false);
+        dividerRevealTimeoutRef.current = null;
+      }, 820);
+    }
+
+    previousLayoutModeRef.current = layoutMode;
+  }, [layoutMode, analysisStatus]);
 
   const handleClear = () => {
     logState("Clear clicked");
@@ -178,6 +251,7 @@ export default function App() {
     analyzeInFlightRef.current = false;
 
     canvasRef.current?.clear();
+    canvasSnapshotRef.current = null;
 
     setErrorMessage(null);
     setCurrentResult(null);
@@ -277,9 +351,6 @@ export default function App() {
       splitViewAlreadyActive,
       currentResultLength: galleryItems.length,
     });
-
-    // ✅ 保证 split view 先打开
-    if (!isExplored) setIsExplored(true);
 
     // ✅ 进入 analyzing：右侧显示 loading，不会再显示 “No object found”
     setAnalysisStatus("analyzing");
@@ -455,29 +526,6 @@ export default function App() {
     }
   };
 
-  if (authStatus === "authenticating") {
-    return (
-      <main className="app-page app-page-center">
-        <div className="session-card">
-          <p className="session-kicker">Doodle Collection</p>
-          <h1 className="session-title">Starting your anonymous archive...</h1>
-        </div>
-      </main>
-    );
-  }
-
-  if (authStatus === "error") {
-    return (
-      <main className="app-page app-page-center">
-        <div className="session-card">
-          <p className="session-kicker">Firebase</p>
-          <h1 className="session-title">We could not start the anonymous session.</h1>
-          <p className="session-copy">{authErrorMessage ?? "Please try again."}</p>
-        </div>
-      </main>
-    );
-  }
-
   const isReadyToAdd = analysisStatus === "ready" && currentResult !== null;
 
   const primaryButtonLabel =
@@ -503,48 +551,51 @@ export default function App() {
     void handleAnalyze();
   };
 
+  const captureCanvasSnapshot = () => {
+    canvasSnapshotRef.current = canvasRef.current?.getCanvasSnapshot() ?? null;
+  };
+
+  const restoreCanvasSnapshot = () => {
+    const snapshot = canvasSnapshotRef.current;
+    if (!snapshot) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      canvasRef.current?.restoreCanvasSnapshot(snapshot);
+    });
+  };
+
   const handleOpenHistory = () => {
+    captureCanvasSnapshot();
     setWorkspaceMode("history");
     setViewMode("explore");
-    setIsExplored(true);
     setDividerPhase("complete");
   };
 
   const handleExitHistoryMode = () => {
     setWorkspaceMode("draw");
+    restoreCanvasSnapshot();
   };
-
-  const workspaceStatusMessage =
-    collectionSaveState === "saved"
-      ? "Added to the shared archive."
-      : collectionSaveState === "error"
-      ? "Could not add this drawing to the shared archive."
-      : historySaveState === "saving"
-      ? "Saving this search to your history..."
-      : historySaveState === "error"
-      ? "Could not save this search to history."
-      : historySaveState === "saved"
-      ? "Saved to your history."
-      : null;
 
   return (
     <>
-      {viewMode === "archive" && (
+      <div className={viewMode === "archive" ? "view-layer" : "view-layer is-hidden"}>
         <ArchiveLanding
           items={sharedArchiveItems}
           isLoading={isSharedArchiveLoading}
           onSelect={setSelectedRecord}
-          onExplore={() => setViewMode("explore")}
         />
-      )}
+      </div>
 
-      {viewMode === "explore" && (
+      <div className={viewMode === "explore" ? "view-layer" : "view-layer is-hidden"}>
         <ExploreWorkspace
           canvasRef={canvasRef}
           isExplored={isExplored}
           workspaceMode={workspaceMode}
           isLoading={isLoading}
           dividerPhase={dividerPhase}
+          animateDividerReveal={animateDividerReveal}
           isClearingGallery={isClearingGallery}
           analysisStatus={analysisStatus}
           galleryItems={galleryItems}
@@ -552,29 +603,93 @@ export default function App() {
           selectedHistoryId={selectedHistoryId}
           selectedHistoryItem={selectedHistoryItem}
           errorMessage={errorMessage}
-          primaryButtonLabel={primaryButtonLabel}
-          isPrimaryDisabled={
-            isLoading ||
-            collectionSaveState === "saving" ||
-            collectionSaveState === "saved"
-          }
-          isPrimaryCta={isReadyToAdd}
-          primaryTooltip={primaryButtonTooltip}
-          workspaceStatusMessage={workspaceStatusMessage}
-          onPrimaryAction={handlePrimaryAction}
-          onBackToArchive={() => {
-            setViewMode("archive");
-            setWorkspaceMode("draw");
-          }}
-          onOpenHistory={handleOpenHistory}
           onSelectHistoryItem={(item) => setSelectedHistoryId(item.id)}
-          onExitHistoryMode={handleExitHistoryMode}
-          onClear={handleClear}
-          onUpload={(image) => canvasRef.current?.drawImage(image)}
         />
-      )}
+      </div>
 
-      <CollectionModal item={selectedRecord} onClose={() => setSelectedRecord(null)} />
+      <h1 className={`app-title global-title layout-${layoutMode}`}>Doodle Collection</h1>
+
+      <div className={`global-controls layout-${layoutMode}`}>
+        <div className="global-controls-stack">
+          {(displayedControlsMode === "archive" || exitingControlsMode === "archive") && (
+            <div
+              className={`global-controls-panel ${
+                displayedControlsMode === "archive"
+                  ? "is-active"
+                  : exitingControlsMode === "archive"
+                  ? "is-exiting"
+                  : ""
+              }`}
+            >
+              <button
+                className="archive-cta"
+                type="button"
+                onClick={() => {
+                  setViewMode("explore");
+                  restoreCanvasSnapshot();
+                }}
+              >
+                Draw to explore
+              </button>
+            </div>
+          )}
+
+          {(displayedControlsMode === "draw" || exitingControlsMode === "draw") && (
+            <div
+              className={`global-controls-panel global-controls-panel--draw ${
+                displayedControlsMode === "draw"
+                  ? "is-active"
+                  : exitingControlsMode === "draw"
+                  ? "is-exiting"
+                  : ""
+              }`}
+            >
+              <AnalysisPanel
+                isLoading={isLoading}
+                showHistoryButton={historyItems.length > 0}
+                onPrimaryAction={handlePrimaryAction}
+                onBackToArchive={() => {
+                  captureCanvasSnapshot();
+                  setViewMode("archive");
+                }}
+                onOpenHistory={handleOpenHistory}
+                onClear={handleClear}
+                onUpload={(image) => canvasRef.current?.drawImage(image)}
+                primaryButtonLabel={primaryButtonLabel}
+                isPrimaryDisabled={
+                  isLoading ||
+                  collectionSaveState === "saving" ||
+                  collectionSaveState === "saved"
+                }
+                isPrimaryCta={isReadyToAdd}
+                primaryTooltip={primaryButtonTooltip}
+              />
+            </div>
+          )}
+
+          {(displayedControlsMode === "history" || exitingControlsMode === "history") && (
+            <div
+              className={`global-controls-panel ${
+                displayedControlsMode === "history"
+                  ? "is-active"
+                  : exitingControlsMode === "history"
+                  ? "is-exiting"
+                  : ""
+              }`}
+            >
+              <button className="history-cta" type="button" onClick={handleExitHistoryMode}>
+                Draw to explore
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <CollectionModal
+        key={selectedRecord?.id ?? "collection-modal-empty"}
+        item={selectedRecord}
+        onClose={() => setSelectedRecord(null)}
+      />
     </>
   );
 }

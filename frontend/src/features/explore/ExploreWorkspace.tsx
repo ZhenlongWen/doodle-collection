@@ -1,4 +1,3 @@
-import { AnalysisPanel } from "../analysis/AnalysisPanel";
 import {
   SketchCanvas,
   type SketchCanvasHandle,
@@ -17,6 +16,7 @@ interface ExploreWorkspaceProps {
   workspaceMode: WorkspaceMode;
   isLoading: boolean;
   dividerPhase: DividerPhase;
+  animateDividerReveal: boolean;
   isClearingGallery: boolean;
   analysisStatus: AnalysisStatus;
   galleryItems: GalleryItem[];
@@ -24,18 +24,7 @@ interface ExploreWorkspaceProps {
   selectedHistoryId: string | null;
   selectedHistoryItem: CollectionRecord | null;
   errorMessage: string | null;
-  primaryButtonLabel: string;
-  isPrimaryDisabled: boolean;
-  isPrimaryCta: boolean;
-  primaryTooltip?: string;
-  workspaceStatusMessage: string | null;
-  onPrimaryAction: () => void;
-  onBackToArchive: () => void;
-  onOpenHistory: () => void;
   onSelectHistoryItem: (item: CollectionRecord) => void;
-  onExitHistoryMode: () => void;
-  onClear: () => void;
-  onUpload: (image: HTMLImageElement) => void;
 }
 
 export function ExploreWorkspace({
@@ -44,6 +33,7 @@ export function ExploreWorkspace({
   workspaceMode,
   isLoading,
   dividerPhase,
+  animateDividerReveal,
   isClearingGallery,
   analysisStatus,
   galleryItems,
@@ -51,20 +41,14 @@ export function ExploreWorkspace({
   selectedHistoryId,
   selectedHistoryItem,
   errorMessage,
-  primaryButtonLabel,
-  isPrimaryDisabled,
-  isPrimaryCta,
-  primaryTooltip,
-  workspaceStatusMessage,
-  onPrimaryAction,
-  onBackToArchive,
-  onOpenHistory,
   onSelectHistoryItem,
-  onExitHistoryMode,
-  onClear,
-  onUpload,
 }: ExploreWorkspaceProps) {
   const isHistoryMode = workspaceMode === "history";
+  const effectiveDividerPhase = !isExplored
+    ? "idle"
+    : dividerPhase === "idle"
+    ? "complete"
+    : dividerPhase;
   const rightPanelItems = isHistoryMode
     ? selectedHistoryItem?.galleryItems ?? []
     : galleryItems;
@@ -76,62 +60,35 @@ export function ExploreWorkspace({
       }`}
     >
       <section className="left-panel">
-        <h1 className="app-title">Doodle Collection</h1>
-        {isHistoryMode
-          ? (
-            <>
+        <div className="workspace-left-body">
+          <div className={`canvas-stage ${isHistoryMode ? "is-hidden" : ""}`}>
+            <SketchCanvas ref={canvasRef} />
+          </div>
+
+          {isHistoryMode && (
+            <div className="history-layer">
               <HistorySketchList
                 items={historyItems}
                 selectedId={selectedHistoryId}
                 onSelect={onSelectHistoryItem}
               />
-              <div className="history-bottom-actions">
-                <button className="archive-cta" type="button" onClick={onExitHistoryMode}>
-                  Draw to explore
-                </button>
-              </div>
-            </>
-          )
-          : (
-            <>
-              <div className="canvas-stage">
-                <SketchCanvas ref={canvasRef} />
-              </div>
-              <div className="bottom-controls">
-                <AnalysisPanel
-                  isLoading={isLoading}
-                  onPrimaryAction={onPrimaryAction}
-                  onBackToArchive={onBackToArchive}
-                  onOpenHistory={onOpenHistory}
-                  onClear={onClear}
-                  onUpload={onUpload}
-                  primaryButtonLabel={primaryButtonLabel}
-                  isPrimaryDisabled={isPrimaryDisabled}
-                  isPrimaryCta={isPrimaryCta}
-                  primaryTooltip={primaryTooltip}
-                />
-                {workspaceStatusMessage && (
-                  <p className="workspace-status">{workspaceStatusMessage}</p>
-                )}
-              </div>
-            </>
+            </div>
           )}
+        </div>
       </section>
 
-      <div className={`divider divider-${dividerPhase}`} />
+      <div
+        className={`divider divider-${effectiveDividerPhase} ${
+          animateDividerReveal && effectiveDividerPhase === "complete" ? "animate-reveal" : ""
+        }`}
+      />
 
       <section className="right-panel">
         <div className={`right-content ${isClearingGallery ? "is-clearing" : ""}`}>
-          {!isExplored && !isHistoryMode && <div className="right-placeholder" />}
-
           {isHistoryMode && rightPanelItems.length > 0 && <Gallery items={rightPanelItems} />}
 
           {isHistoryMode && rightPanelItems.length === 0 && (
             <div className="right-empty">No history item selected yet.</div>
-          )}
-
-          {!isHistoryMode && isExplored && analysisStatus === "idle" && (
-            <div className="right-placeholder" />
           )}
 
           {!isHistoryMode && isExplored && analysisStatus === "analyzing" && (
@@ -143,7 +100,7 @@ export function ExploreWorkspace({
 
           {!isHistoryMode && isExplored && analysisStatus === "ready" &&
             rightPanelItems.length === 0 && (
-            <div className="right-empty">No object found</div>
+            <div className="right-empty">No matches found, try another one!</div>
           )}
 
           {!isHistoryMode && isExplored && analysisStatus === "error" && (

@@ -41,7 +41,6 @@ export function HistoryPage({
 
         <CollectionGrid
           items={items}
-          emptyMessage="Your history is empty right now. Run a drawing search to start filling it."
           isLoading={isLoading}
           showMetadata
           onSelect={onSelect}

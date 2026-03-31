@@ -3,7 +3,6 @@ import "./Archive.css";
 
 interface CollectionGridProps {
   items: CollectionRecord[];
-  emptyMessage: string;
   isLoading?: boolean;
   showMetadata?: boolean;
   variant?: "default" | "wall";
@@ -24,18 +23,17 @@ function formatDate(createdAtMs: number) {
 
 export function CollectionGrid({
   items,
-  emptyMessage,
   isLoading = false,
   showMetadata = false,
   variant = "default",
   onSelect,
 }: CollectionGridProps) {
   if (isLoading) {
-    return <div className="collection-empty">Loading collection...</div>;
+    return null;
   }
 
   if (items.length === 0) {
-    return <div className="collection-empty">{emptyMessage}</div>;
+    return null;
   }
 
   return (

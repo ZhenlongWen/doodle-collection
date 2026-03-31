@@ -10,7 +10,6 @@ import { TextureBrush, type Point } from "./textureBrush";
 const EXPORT_MIN_SIZE = 1024;
 const EXPORT_MAX_SIZE = 1600;
 const EXPORT_PADDING = 36;
-const HINT_FONT_SIZE = 22;
 const MAX_DEVICE_PIXEL_RATIO = 2;
 const UPLOAD_PREVIEW_MAX_CSS_SIZE = 320;
 const getClampedDevicePixelRatio = () =>
@@ -20,6 +19,8 @@ export interface SketchCanvasHandle {
   clear: () => void;
   drawImage: (image: HTMLImageElement) => void;
   getImageBase64: () => string;
+  getCanvasSnapshot: () => string | null;
+  restoreCanvasSnapshot: (snapshot: string) => void;
   hasDrawing: boolean;
 }
 
@@ -44,25 +45,6 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
       { width: number; height: number } | null
     >(null);
 
-    function drawHint(shouldShowHint: boolean) {
-      const canvas = canvasRef.current;
-      const context = canvas?.getContext("2d");
-      if (!canvas || !context || !shouldShowHint) return;
-
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      context.fillStyle = "#828791";
-      context.font = `${
-        HINT_FONT_SIZE * getClampedDevicePixelRatio()
-      }px "Spline Sans Mono", monospace`;
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      context.fillText(
-        "*Draw to explore",
-        canvas.width / 2,
-        canvas.height / 2,
-      );
-    }
-
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -79,8 +61,6 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
         canvas.height = Math.max(1, Math.round(window.innerHeight * dpr));
       }
       canvas.style.touchAction = "none";
-
-      drawHint(true);
 
       let timeoutId: number | null = null;
       const redrawUploadedPreview = (
@@ -203,28 +183,6 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
       return textureBrushRef.current.load();
     }, []);
 
-    useEffect(() => {
-      if (showHint) {
-        drawHint(showHint);
-      }
-    }, [showHint]);
-
-    useEffect(() => {
-      if (!showHint) return;
-      if (!("fonts" in document)) return;
-
-      let cancelled = false;
-      document.fonts.load(`${HINT_FONT_SIZE}px "Spline Sans Mono"`).then(() => {
-        if (!cancelled && showHint) {
-          drawHint(showHint);
-        }
-      });
-
-      return () => {
-        cancelled = true;
-      };
-    }, [showHint]);
-
     const drawTextureBrushStroke = (
       context: CanvasRenderingContext2D,
       from: Point,
@@ -251,11 +209,6 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
 
       if (showHint) {
         setShowHint(false);
-        const canvas = canvasRef.current;
-        const context = canvas?.getContext("2d");
-        if (canvas && context) {
-          context.clearRect(0, 0, canvas.width, canvas.height);
-        }
       }
 
       const canvas = canvasRef.current;
@@ -521,35 +474,73 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, SketchCanvasProps>(
 
         return exportCanvas.toDataURL("image/png");
       },
+      getCanvasSnapshot: () => {
+        const canvas = canvasRef.current;
+        if (!canvas || !hasDrawing) return null;
+        return canvas.toDataURL("image/png");
+      },
+      restoreCanvasSnapshot: (snapshot: string) => {
+        const canvas = canvasRef.current;
+        const context = canvas?.getContext("2d");
+        if (!canvas || !context || !snapshot) return;
+
+        const image = new Image();
+        image.onload = () => {
+          if (clearTimeoutRef.current !== null) {
+            window.clearTimeout(clearTimeoutRef.current);
+            clearTimeoutRef.current = null;
+          }
+
+          context.clearRect(0, 0, canvas.width, canvas.height);
+          context.imageSmoothingEnabled = true;
+          context.imageSmoothingQuality = "high";
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+          uploadedImageRef.current = null;
+          uploadedPreviewCssSizeRef.current = null;
+          contentModeRef.current = "drawing";
+          setIsClearing(false);
+          setShowHint(false);
+          setHasDrawing(true);
+        };
+        image.src = snapshot;
+      },
       hasDrawing,
     }));
 
     return (
-      <canvas
-        ref={canvasRef}
-        className={isClearing ? "canvas-clearing" : ""}
-        onMouseDown={(event) => {
-          const point = getPointFromMouse(event);
-          if (point) beginDrawing(point.x, point.y);
-        }}
-        onMouseMove={(event) => {
-          const point = getPointFromMouse(event);
-          if (point) continueDrawing(point.x, point.y);
-        }}
-        onMouseUp={endDrawing}
-        onMouseLeave={endDrawing}
-        onTouchStart={(event) => {
-          event.preventDefault();
-          const point = getPointFromTouch(event);
-          if (point) beginDrawing(point.x, point.y);
-        }}
-        onTouchMove={(event) => {
-          event.preventDefault();
-          const point = getPointFromTouch(event);
-          if (point) continueDrawing(point.x, point.y);
-        }}
-        onTouchEnd={endDrawing}
-      />
+      <div className="sketch-canvas-shell">
+        <canvas
+          ref={canvasRef}
+          className={isClearing ? "canvas-clearing" : ""}
+          onMouseDown={(event) => {
+            const point = getPointFromMouse(event);
+            if (point) beginDrawing(point.x, point.y);
+          }}
+          onMouseMove={(event) => {
+            const point = getPointFromMouse(event);
+            if (point) continueDrawing(point.x, point.y);
+          }}
+          onMouseUp={endDrawing}
+          onMouseLeave={endDrawing}
+          onTouchStart={(event) => {
+            event.preventDefault();
+            const point = getPointFromTouch(event);
+            if (point) beginDrawing(point.x, point.y);
+          }}
+          onTouchMove={(event) => {
+            event.preventDefault();
+            const point = getPointFromTouch(event);
+            if (point) continueDrawing(point.x, point.y);
+          }}
+          onTouchEnd={endDrawing}
+        />
+        {showHint && (
+          <div className="canvas-hint" aria-hidden="true">
+            <span>*Draw to explore</span>
+          </div>
+        )}
+      </div>
     );
   },
 );

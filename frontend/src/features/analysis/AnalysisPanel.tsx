@@ -2,6 +2,7 @@ import { useRef } from "react";
 
 interface AnalysisPanelProps {
   isLoading: boolean;
+  showHistoryButton: boolean;
   onPrimaryAction: () => void;
   onBackToArchive: () => void;
   onOpenHistory: () => void;
@@ -15,6 +16,7 @@ interface AnalysisPanelProps {
 
 export function AnalysisPanel({
   isLoading,
+  showHistoryButton,
   onPrimaryAction,
   onBackToArchive,
   onOpenHistory,
@@ -88,9 +90,11 @@ export function AnalysisPanel({
         >
           {isLoading ? "Submitting..." : primaryButtonLabel}
         </button>
-        <button className="btn" type="button" onClick={onOpenHistory}>
-          History
-        </button>
+        {showHistoryButton && (
+          <button className="btn" type="button" onClick={onOpenHistory}>
+            History
+          </button>
+        )}
       </div>
 
       <input

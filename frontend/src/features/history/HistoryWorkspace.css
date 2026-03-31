@@ -65,9 +65,30 @@
   width: min(calc(100% - 24px), 720px);
 }
 
+@media (min-width: 901px) {
+  .history-panel {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .history-panel::-webkit-scrollbar {
+    width: 0;
+    display: none;
+  }
+}
+
 @media (max-width: 900px) {
   .history-panel {
-    padding: 92px 24px 112px;
+    height: auto;
+    min-height: var(--mobile-workspace-stage-height);
+    padding: 0 24px;
+    overflow-y: visible;
+  }
+
+  .history-empty-panel {
+    height: auto;
+    min-height: var(--mobile-workspace-stage-height);
+    padding: 0 24px;
   }
 
   .history-grid {
